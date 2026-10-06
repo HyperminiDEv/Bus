@@ -11,6 +11,24 @@
   :root{
     --ink:#17202b; --muted:#6a7584; --line:#e3e7ec; --panel:rgba(255,255,255,.96);
     --accent:#0d6b57; --warn:#b3261e;
+
+    /* ---- Colores de buses ----
+       Color por defecto (azul) para cualquier empresa sin variable propia. */
+    --bus-default:#1d4ed8;
+
+    /* Una variable por empresa: --bus-<nombre-en-minusculas-con-guiones>.
+       Sin tildes ni símbolos ("Rutas del Sol" -> --bus-rutas-del-sol).
+       Los nombres exactos que llegan de la API aparecen en los logs. */
+    --bus-cot:#d6453d;
+    --bus-copsa:#e08a00;
+    --bus-turil:#2e9e5b;
+    --bus-rutas-del-sol:#c2185b;
+    --bus-nossar:#7b3fb5;
+    --bus-casanova:#00897b;
+    --bus-cita:#6d4c41;
+    --bus-copay:#f4511e;
+    --bus-tur-nor:#455a64;
+    --bus-el-rapido:#827717;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{height:100%;margin:0;background:#fff;color:var(--ink);
@@ -26,8 +44,7 @@
   .field{flex:1;min-width:0;display:flex;gap:6px}
   input,select,button{font:inherit;color:var(--ink);border:1px solid var(--line);border-radius:10px;
     background:var(--panel);height:42px;padding:0 12px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
-  input{flex:1;min-width:0;font-size:16px} /* 16px evita el zoom automático de iOS */
-  select{max-width:42%;font-size:16px}
+  select{flex:1;min-width:0;max-width:280px;font-size:16px} /* 16px evita el zoom automático de iOS */
   button{display:grid;place-items:center;width:42px;padding:0;cursor:pointer}
   button:active{background:#eef1f4}
   button svg{width:20px;height:20px;stroke:var(--ink);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
@@ -65,7 +82,6 @@
 
 <div class="bar">
   <div class="field">
-    <input id="q" type="search" placeholder="Buscar empresa, destino, línea…" autocomplete="off" autocapitalize="off" enterkeyhint="search">
     <select id="company" aria-label="Empresa"><option value="">Todas</option></select>
   </div>
   <button id="btnLocate" aria-label="Mi ubicación"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7"/></svg></button>
@@ -270,7 +286,7 @@ function normalize(json) {
     const idv = pick(o, ID_KEYS, CONFIG.FIELD_ID);
     const id = idv !== undefined && idv !== null && idv !== "" ? String(idv) : "idx" + i;
     const comp = String(pick(o, COMPANY_KEYS, CONFIG.FIELD_COMPANY) ?? "—");
-    out.push({ id, ll, company: comp, raw: o, search: JSON.stringify(o).toLowerCase() });
+    out.push({ id, ll, company: comp, raw: o });
   });
   return out;
 }
@@ -307,13 +323,20 @@ const layer = L.layerGroup().addTo(map);
 const popup = L.popup({ closeButton: true, autoPan: true, maxWidth: 260 });
 log("info", "Mapa inicializado", { center: CONFIG.DEFAULT_CENTER, zoom: CONFIG.DEFAULT_ZOOM });
 
-/* Colores estables por empresa */
+/* Color por empresa, leído de las variables CSS (--bus-<empresa>, o --bus-default) */
 const colorCache = {};
+function slug(s) {
+  return String(s).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
 function colorFor(company) {
   if (!colorCache[company]) {
-    let h = 0;
-    for (let i = 0; i < company.length; i++) h = (h * 31 + company.charCodeAt(i)) % 360;
-    colorCache[company] = `hsl(${h},62%,42%)`;
+    const cs = getComputedStyle(document.documentElement);
+    const name = "--bus-" + slug(company);
+    const own = cs.getPropertyValue(name).trim();
+    const color = own || cs.getPropertyValue("--bus-default").trim() || "#1d4ed8";
+    log("debug", own ? `Color de "${company}" desde ${name}` : `"${company}" sin ${name}, usa --bus-default`, color);
+    colorCache[company] = color;
   }
   return colorCache[company];
 }
@@ -322,12 +345,11 @@ function colorFor(company) {
  * Estado de buses + render incremental
  * ============================================================ */
 const markers = new Map();       // id -> { marker, data, visible }
-let filterText = "", filterCompany = "";
+let filterCompany = "";
 let userMoved = false;
 
 function matches(d) {
   if (filterCompany && d.company !== filterCompany) return false;
-  if (filterText && !d.search.includes(filterText)) return false;
   return true;
 }
 function popupHtml(d) {
@@ -460,15 +482,6 @@ map.on("dragstart zoomstart", () => { userMoved = true; });
 /* ============================================================
  * UI
  * ============================================================ */
-let qTimer;
-document.getElementById("q").addEventListener("input", e => {
-  clearTimeout(qTimer);
-  qTimer = setTimeout(() => {
-    filterText = e.target.value.trim().toLowerCase();
-    refreshVisibility(); updateCount();
-    log("debug", "Filtro texto", filterText);
-  }, 200);
-});
 document.getElementById("company").addEventListener("change", e => {
   filterCompany = e.target.value;
   refreshVisibility(); updateCount();

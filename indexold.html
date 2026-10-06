@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#ffffff">
+<title>Buses en el mapa</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root{
+    --ink:#17202b; --muted:#6a7584; --line:#e3e7ec; --panel:rgba(255,255,255,.96);
+    --accent:#0d6b57; --warn:#b3261e;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;margin:0;background:#fff;color:var(--ink);
+    font:15px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overscroll-behavior:none}
+  #map{position:fixed;inset:0;background:#f4f5f6}
+  .leaflet-container{font:inherit}
+  .base-tiles{filter:var(--tile-filter,none)}
+
+  .bar{position:fixed;z-index:1000;left:0;right:0;top:0;
+    padding:calc(env(safe-area-inset-top,0px) + 8px) 10px 8px;
+    display:flex;gap:8px;align-items:center;pointer-events:none}
+  .bar>*{pointer-events:auto}
+  .field{flex:1;min-width:0;display:flex;gap:6px}
+  input,select,button{font:inherit;color:var(--ink);border:1px solid var(--line);border-radius:10px;
+    background:var(--panel);height:42px;padding:0 12px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  input{flex:1;min-width:0;font-size:16px} /* 16px evita el zoom automático de iOS */
+  select{max-width:42%;font-size:16px}
+  button{display:grid;place-items:center;width:42px;padding:0;cursor:pointer}
+  button:active{background:#eef1f4}
+  button svg{width:20px;height:20px;stroke:var(--ink);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  button.on svg{stroke:var(--accent)}
+
+  .status{position:fixed;z-index:1000;left:10px;
+    bottom:calc(env(safe-area-inset-bottom,0px) + 12px);
+    background:var(--panel);border:1px solid var(--line);border-radius:999px;
+    padding:7px 13px;font-size:13px;color:var(--muted);box-shadow:0 1px 3px rgba(0,0,0,.08);
+    display:flex;gap:8px;align-items:center;max-width:calc(100% - 20px)}
+  .dot{width:8px;height:8px;border-radius:50%;background:#aab2bd;flex:none}
+  .dot.ok{background:var(--accent)} .dot.err{background:var(--warn)} .dot.load{background:#d89b00}
+
+  #logpanel{position:fixed;z-index:1001;left:0;right:0;bottom:0;height:45%;
+    background:#10161d;color:#cfe3d9;display:none;flex-direction:column;
+    padding-bottom:env(safe-area-inset-bottom,0px)}
+  #logpanel.open{display:flex}
+  #logpanel header{display:flex;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #26313d}
+  #logpanel header b{flex:1;font-weight:600}
+  #logpanel header button{width:auto;height:32px;padding:0 12px;font-size:13px;background:#1b2530;color:#cfe3d9;border-color:#2c3a48;box-shadow:none}
+  #logbody{flex:1;overflow:auto;padding:6px 10px;font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;
+    -webkit-overflow-scrolling:touch;white-space:pre-wrap;word-break:break-word}
+  .l-warn{color:#f1c36a} .l-error{color:#ff8c84} .l-debug{color:#7f93a6}
+
+  .leaflet-popup-content-wrapper{border-radius:12px}
+  .leaflet-popup-content{margin:12px 14px;min-width:170px;font-size:13px}
+  .pop h3{margin:0 0 6px;font-size:15px}
+  .pop dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:2px 10px}
+  .pop dt{color:var(--muted)} .pop dd{margin:0;word-break:break-word}
+  .me{width:16px;height:16px;border-radius:50%;background:#1a73e8;border:3px solid #fff;box-shadow:0 0 0 2px rgba(26,115,232,.35)}
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="bar">
+  <div class="field">
+    <input id="q" type="search" placeholder="Buscar empresa, destino, línea…" autocomplete="off" autocapitalize="off" enterkeyhint="search">
+    <select id="company" aria-label="Empresa"><option value="">Todas</option></select>
+  </div>
+  <button id="btnLocate" aria-label="Mi ubicación"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7"/></svg></button>
+  <button id="btnLog" aria-label="Ver logs"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg></button>
+</div>
+
+<div class="status"><span id="dot" class="dot load"></span><span id="statusText">Cargando…</span></div>
+
+<section id="logpanel">
+  <header><b>Logs</b><button id="logCopy">Copiar</button><button id="logClear">Limpiar</button><button id="logClose">Cerrar</button></header>
+  <div id="logbody"></div>
+</section>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* ============================================================
+ * CONFIGURACIÓN — todo lo que puede cambiar está acá
+ * ============================================================ */
+const CONFIG = {
+  // --- API ---
+  API_URL: "https://seguitubus.trescruces.com.uy/api/auth/app", // BASE_URL del código Python
+  ENDPOINT_BUSES: "WSlistservmap",     // lista de servicios con posición (list_serv_map)
+  ENDPOINT_VERSION: "WSversion",       // por si hay que chequear versión
+  APP_VERSION: "7.0",                  // VERSION del código Python (la app Android es 7.4.14)
+  APPLICATION_ID: "trescruces.com.seguitubus",
+
+  // --- Autenticación ---
+  // El código Python no manda token. Si el servidor te lo exige, pegá acá el
+  // BuildConfig.AUTH_TOKEN completo (con "Bearer ") y poné USE_AUTH en true.
+  USE_AUTH: false,
+  AUTH_TOKEN: "",                      // ej: "Bearer eyJ0eXAi..."
+  AUTH_HEADER: "Authorization",
+  SEND_XHR_HEADER: false,              // X-Requested-With (cada header extra fuerza preflight CORS)
+  EXTRA_HEADERS: {},                   // ej: { "X-Api-Key": "..." }
+
+  // --- Filtros enviados a la API (igual que list_serv_map) ---
+  FILTROS: {},                         // ej: { Empresa: "COT" }  (en mayúsculas)
+
+  // --- Mapa (claro, sin satélite) ---
+  // OpenStreetMap (open source, sin API key). Para uso intensivo conviene un servidor
+  // propio o un proveedor; ver https://operations.osmfoundation.org/policies/tiles/
+  TILE_URL: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+  TILE_ATTRIBUTION: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  TILE_SUBDOMAINS: "abc",
+  TILE_MAX_ZOOM: 19,
+  // OSM es a color: este filtro CSS lo deja claro/casi blanco. Poné "none" para verlo normal.
+  TILE_FILTER: "grayscale(1) brightness(1.12) contrast(.8)",
+  DEFAULT_CENTER: [-34.5228, -56.2778], // Canelones (ciudad)
+  DEFAULT_ZOOM: 11,
+  LOCATION_ZOOM: 13,
+  GEO_TIMEOUT_MS: 6000,                // si no responde la ubicación, se queda en Canelones
+
+  // --- Rendimiento ---
+  REFRESH_MS: 10000,                   // cada cuánto se actualizan los buses
+  REQUEST_TIMEOUT_MS: 15000,
+  MAX_BACKOFF_MS: 60000,               // espera máxima tras errores seguidos
+  MARKER_RADIUS: 6,
+  PAUSE_WHEN_HIDDEN: true,             // no consulta con la pestaña en segundo plano
+
+  // --- Campos (se autodetectan; podés forzarlos acá) ---
+  FIELD_LAT: null,                     // ej: "latitud"
+  FIELD_LNG: null,                     // ej: "longitud"
+  FIELD_ID: null,                      // ej: "bus"
+  FIELD_COMPANY: null,                 // ej: "Empresa"
+
+  // --- Logs ---
+  LOG_LEVEL: "debug",                  // debug | info | warn | error
+  LOG_MAX_LINES: 300,
+  LOG_RAW_SAMPLE: true                 // loguea un ejemplo crudo de la respuesta
+};
+
+/* ============================================================
+ * LOGGER (consola + panel en pantalla)
+ * ============================================================ */
+const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
+const logBody = document.getElementById("logbody");
+const logLines = [];
+function log(level, msg, data) {
+  if (LEVELS[level] < LEVELS[CONFIG.LOG_LEVEL]) return;
+  const t = new Date().toISOString().slice(11, 23);
+  let extra = "";
+  if (data !== undefined) {
+    try { extra = " " + (typeof data === "string" ? data : JSON.stringify(data, null, 0)); }
+    catch (_) { extra = " [no serializable]"; }
+    if (extra.length > 900) extra = extra.slice(0, 900) + "…";
+  }
+  const line = `${t} [${level.toUpperCase()}] ${msg}${extra}`;
+  (console[level] || console.log)("[buses]", msg, data !== undefined ? data : "");
+  logLines.push(line);
+  if (logLines.length > CONFIG.LOG_MAX_LINES) logLines.shift();
+  if (document.getElementById("logpanel").classList.contains("open")) paintLogs();
+}
+function paintLogs() {
+  logBody.innerHTML = logLines.map(l => {
+    const m = l.match(/\[(DEBUG|INFO|WARN|ERROR)\]/);
+    const cls = m ? "l-" + m[1].toLowerCase() : "";
+    return `<div class="${cls}">${esc(l)}</div>`;
+  }).join("");
+  logBody.scrollTop = logBody.scrollHeight;
+}
+window.addEventListener("error", e => log("error", "Error global: " + e.message));
+window.addEventListener("unhandledrejection", e => log("error", "Promesa rechazada: " + (e.reason && e.reason.message || e.reason)));
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/* ============================================================
+ * API
+ * ============================================================ */
+function buildHeaders() {
+  const h = { "Accept": "application/json", "Content-Type": "application/json" };
+  if (CONFIG.SEND_XHR_HEADER) h["X-Requested-With"] = "XMLHttpRequest";
+  if (CONFIG.USE_AUTH && CONFIG.AUTH_TOKEN) h[CONFIG.AUTH_HEADER] = CONFIG.AUTH_TOKEN;
+  Object.assign(h, CONFIG.EXTRA_HEADERS);
+  return h;
+}
+
+let inflight = null;
+async function apiPost(path, body) {
+  if (inflight) inflight.abort();
+  const ctl = new AbortController();
+  inflight = ctl;
+  const timer = setTimeout(() => ctl.abort(), CONFIG.REQUEST_TIMEOUT_MS);
+  const url = `${CONFIG.API_URL}/${path}`;
+  const t0 = performance.now();
+  log("debug", `POST ${url}`, body);
+  try {
+    const res = await fetch(url, { method: "POST", headers: buildHeaders(), body: JSON.stringify(body), signal: ctl.signal });
+    const ms = Math.round(performance.now() - t0);
+    log("info", `HTTP ${res.status} ${path} (${ms} ms)`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error("Tiempo de espera agotado");
+    if (e instanceof TypeError) throw new Error("No se pudo conectar (¿CORS o sin internet?)");
+    throw e;
+  } finally {
+    clearTimeout(timer);
+    if (inflight === ctl) inflight = null;
+  }
+}
+
+/* ============================================================
+ * Normalización de la respuesta (estructura autodetectada)
+ * ============================================================ */
+const LAT_KEYS = ["lat", "latitud", "latitude", "y"];
+const LNG_KEYS = ["lng", "lon", "long", "longitud", "longitude", "x"];
+const ID_KEYS = ["bus", "idbus", "id", "coche", "nrocoche", "matricula", "unidad", "nrobus"];
+const COMPANY_KEYS = ["empresa", "company", "operador"];
+
+function pick(o, keys, forced) {
+  if (forced && o[forced] !== undefined) return o[forced];
+  const lower = {};
+  for (const k in o) lower[k.toLowerCase()] = k;
+  for (const k of keys) if (lower[k] !== undefined) return o[lower[k]];
+  return undefined;
+}
+function num(v) {
+  if (v === null || v === undefined || v === "") return NaN;
+  return typeof v === "number" ? v : parseFloat(String(v).replace(",", "."));
+}
+function coordsOf(o) {
+  let lat = num(pick(o, LAT_KEYS, CONFIG.FIELD_LAT));
+  let lng = num(pick(o, LNG_KEYS, CONFIG.FIELD_LNG));
+  if (isNaN(lat) || isNaN(lng)) {
+    for (const k in o) {
+      const v = o[k];
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        const a = num(pick(v, LAT_KEYS)), b = num(pick(v, LNG_KEYS));
+        if (!isNaN(a) && !isNaN(b)) { lat = a; lng = b; break; }
+      } else if (typeof v === "string" && /^\s*-?\d+[.,]\d+\s*[,;]\s*-?\d+[.,]\d+\s*$/.test(v)) {
+        const p = v.split(/[;,](?=\s*-?\d)/);
+        if (p.length === 2) { lat = num(p[0]); lng = num(p[1]); break; }
+      }
+    }
+  }
+  if (isNaN(lat) || isNaN(lng)) return null;
+  if (Math.abs(lat) > 90 && Math.abs(lng) <= 90) [lat, lng] = [lng, lat];
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180 || (lat === 0 && lng === 0)) return null;
+  return [lat, lng];
+}
+function findBusArray(node, depth = 0) {
+  if (depth > 5 || node === null || typeof node !== "object") return null;
+  if (Array.isArray(node)) {
+    const sample = node.slice(0, 20).filter(x => x && typeof x === "object");
+    if (sample.length && sample.some(x => coordsOf(x))) return node;
+    for (const x of node.slice(0, 5)) { const r = findBusArray(x, depth + 1); if (r) return r; }
+    return null;
+  }
+  for (const k in node) { const r = findBusArray(node[k], depth + 1); if (r) return r; }
+  return null;
+}
+function normalize(json) {
+  const arr = findBusArray(json);
+  if (!arr) return [];
+  const out = [];
+  arr.forEach((o, i) => {
+    if (!o || typeof o !== "object") return;
+    const ll = coordsOf(o);
+    if (!ll) return;
+    const idv = pick(o, ID_KEYS, CONFIG.FIELD_ID);
+    const id = idv !== undefined && idv !== null && idv !== "" ? String(idv) : "idx" + i;
+    const comp = String(pick(o, COMPANY_KEYS, CONFIG.FIELD_COMPANY) ?? "—");
+    out.push({ id, ll, company: comp, raw: o, search: JSON.stringify(o).toLowerCase() });
+  });
+  return out;
+}
+
+/* ============================================================
+ * MAPA
+ * ============================================================ */
+const map = L.map("map", {
+  center: CONFIG.DEFAULT_CENTER,
+  zoom: CONFIG.DEFAULT_ZOOM,
+  preferCanvas: true,            // marcadores dibujados en <canvas>, no en miles de nodos DOM
+  zoomControl: false,
+  attributionControl: true,
+  zoomAnimation: !/iP(hone|ad|od)/.test(navigator.userAgent),
+  markerZoomAnimation: false,
+  fadeAnimation: false,
+  inertia: true,
+  tap: true
+});
+map.attributionControl.setPrefix(false);
+document.documentElement.style.setProperty("--tile-filter", CONFIG.TILE_FILTER || "none");
+L.control.zoom({ position: "bottomright" }).addTo(map);
+L.tileLayer(CONFIG.TILE_URL, {
+  attribution: CONFIG.TILE_ATTRIBUTION,
+  subdomains: CONFIG.TILE_SUBDOMAINS,
+  maxZoom: CONFIG.TILE_MAX_ZOOM,
+  className: "base-tiles",
+  updateWhenIdle: true,          // menos pedidos mientras se arrastra
+  updateWhenZooming: false,
+  keepBuffer: 1
+}).addTo(map);
+const canvas = L.canvas({ padding: 0.3, tolerance: 8 });
+const layer = L.layerGroup().addTo(map);
+const popup = L.popup({ closeButton: true, autoPan: true, maxWidth: 260 });
+log("info", "Mapa inicializado", { center: CONFIG.DEFAULT_CENTER, zoom: CONFIG.DEFAULT_ZOOM });
+
+/* Colores estables por empresa */
+const colorCache = {};
+function colorFor(company) {
+  if (!colorCache[company]) {
+    let h = 0;
+    for (let i = 0; i < company.length; i++) h = (h * 31 + company.charCodeAt(i)) % 360;
+    colorCache[company] = `hsl(${h},62%,42%)`;
+  }
+  return colorCache[company];
+}
+
+/* ============================================================
+ * Estado de buses + render incremental
+ * ============================================================ */
+const markers = new Map();       // id -> { marker, data, visible }
+let filterText = "", filterCompany = "";
+let userMoved = false;
+
+function matches(d) {
+  if (filterCompany && d.company !== filterCompany) return false;
+  if (filterText && !d.search.includes(filterText)) return false;
+  return true;
+}
+function popupHtml(d) {
+  const rows = Object.entries(d.raw)
+    .filter(([, v]) => v !== null && v !== "" && typeof v !== "object")
+    .slice(0, 14)
+    .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+  return `<div class="pop"><h3>${esc(d.company)}</h3><dl>${rows}</dl></div>`;
+}
+function applyData(list) {
+  const seen = new Set();
+  let added = 0, moved = 0;
+  for (const d of list) {
+    seen.add(d.id);
+    let e = markers.get(d.id);
+    if (!e) {
+      const m = L.circleMarker(d.ll, {
+        renderer: canvas, radius: CONFIG.MARKER_RADIUS, weight: 2, color: "#fff",
+        fillColor: colorFor(d.company), fillOpacity: 0.95
+      });
+      m.on("click", () => {
+        const cur = markers.get(d.id);
+        popup.setLatLng(cur.marker.getLatLng()).setContent(popupHtml(cur.data)).openOn(map);
+      });
+      e = { marker: m, data: d, visible: false };
+      markers.set(d.id, e);
+      added++;
+    } else {
+      if (e.data.ll[0] !== d.ll[0] || e.data.ll[1] !== d.ll[1]) { e.marker.setLatLng(d.ll); moved++; }
+      e.data = d;
+    }
+  }
+  let removed = 0;
+  for (const [id, e] of markers) {
+    if (!seen.has(id)) { layer.removeLayer(e.marker); markers.delete(id); removed++; }
+  }
+  refreshVisibility();
+  log("info", `Buses: ${list.length} (nuevos ${added}, movidos ${moved}, quitados ${removed})`);
+}
+function refreshVisibility() {
+  let shown = 0;
+  for (const e of markers.values()) {
+    const ok = matches(e.data);
+    if (ok && !e.visible) { layer.addLayer(e.marker); e.visible = true; }
+    else if (!ok && e.visible) { layer.removeLayer(e.marker); e.visible = false; }
+    if (ok) shown++;
+  }
+  return shown;
+}
+function fillCompanies(list) {
+  const sel = document.getElementById("company");
+  const names = [...new Set(list.map(d => d.company))].sort();
+  const have = [...sel.options].slice(1).map(o => o.value).join("|");
+  if (have === names.join("|")) return;
+  const cur = sel.value;
+  sel.length = 1;
+  for (const n of names) sel.add(new Option(n, n));
+  sel.value = names.includes(cur) ? cur : "";
+  log("debug", "Empresas detectadas", names);
+}
+
+/* ============================================================
+ * Estado en pantalla
+ * ============================================================ */
+const dotEl = document.getElementById("dot"), statusEl = document.getElementById("statusText");
+function setStatus(kind, text) { dotEl.className = "dot " + kind; statusEl.textContent = text; }
+function updateCount() {
+  const total = markers.size, shown = [...markers.values()].filter(e => e.visible).length;
+  const hora = new Date().toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  setStatus("ok", total === shown ? `${total} buses · ${hora}` : `${shown} de ${total} buses · ${hora}`);
+}
+
+/* ============================================================
+ * Ciclo de actualización
+ * ============================================================ */
+let failures = 0, timer = null, firstLoad = true, rawLogged = false;
+async function refresh() {
+  clearTimeout(timer);
+  if (CONFIG.PAUSE_WHEN_HIDDEN && document.hidden) { log("debug", "Pestaña oculta, pausado"); return; }
+  setStatus("load", markers.size ? "Actualizando…" : "Cargando buses…");
+  try {
+    const json = await apiPost(CONFIG.ENDPOINT_BUSES, { filtros: CONFIG.FILTROS });
+    if (CONFIG.LOG_RAW_SAMPLE && !rawLogged) {
+      rawLogged = true;
+      log("debug", "Muestra de respuesta cruda", JSON.stringify(json).slice(0, 700));
+    }
+    const list = normalize(json);
+    if (!list.length) {
+      log("warn", "La respuesta no trae buses con coordenadas. Revisá FIELD_LAT / FIELD_LNG o ENDPOINT_BUSES");
+      setStatus("err", "Sin buses con coordenadas");
+    } else {
+      applyData(list);
+      fillCompanies(list);
+      updateCount();
+    }
+    failures = 0;
+  } catch (e) {
+    failures++;
+    log("error", `Falló la actualización (#${failures}): ${e.message}`);
+    setStatus("err", e.message);
+  }
+  const wait = Math.min(CONFIG.REFRESH_MS * Math.pow(2, Math.max(0, failures - 1)), CONFIG.MAX_BACKOFF_MS);
+  if (failures) log("debug", `Próximo intento en ${Math.round(wait / 1000)} s`);
+  timer = setTimeout(refresh, wait);
+}
+document.addEventListener("visibilitychange", () => {
+  log("debug", document.hidden ? "App en segundo plano" : "App en primer plano");
+  if (!document.hidden) refresh();
+});
+
+/* ============================================================
+ * Ubicación del usuario
+ * ============================================================ */
+let meMarker = null;
+function locate(auto) {
+  if (!("geolocation" in navigator)) { log("warn", "Geolocalización no disponible; se usa Canelones"); return; }
+  log("info", auto ? "Pidiendo ubicación (inicio)…" : "Pidiendo ubicación (botón)…");
+  navigator.geolocation.getCurrentPosition(pos => {
+    const ll = [pos.coords.latitude, pos.coords.longitude];
+    log("info", "Ubicación obtenida", { lat: ll[0], lng: ll[1], precision_m: Math.round(pos.coords.accuracy) });
+    if (!meMarker) meMarker = L.marker(ll, { icon: L.divIcon({ className: "", html: '<div class="me"></div>', iconSize: [16, 16] }), interactive: false, keyboard: false }).addTo(map);
+    else meMarker.setLatLng(ll);
+    if (!auto || !userMoved) map.setView(ll, CONFIG.LOCATION_ZOOM, { animate: false });
+  }, err => {
+    log("warn", `No se pudo obtener ubicación (${err.code}): ${err.message}. Se queda en Canelones`);
+  }, { enableHighAccuracy: false, timeout: CONFIG.GEO_TIMEOUT_MS, maximumAge: 60000 });
+}
+map.on("dragstart zoomstart", () => { userMoved = true; });
+
+/* ============================================================
+ * UI
+ * ============================================================ */
+let qTimer;
+document.getElementById("q").addEventListener("input", e => {
+  clearTimeout(qTimer);
+  qTimer = setTimeout(() => {
+    filterText = e.target.value.trim().toLowerCase();
+    refreshVisibility(); updateCount();
+    log("debug", "Filtro texto", filterText);
+  }, 200);
+});
+document.getElementById("company").addEventListener("change", e => {
+  filterCompany = e.target.value;
+  refreshVisibility(); updateCount();
+  log("debug", "Filtro empresa", filterCompany || "(todas)");
+});
+document.getElementById("btnLocate").addEventListener("click", () => locate(false));
+const logPanel = document.getElementById("logpanel"), btnLog = document.getElementById("btnLog");
+function toggleLogs(open) {
+  logPanel.classList.toggle("open", open);
+  btnLog.classList.toggle("on", open);
+  if (open) paintLogs();
+}
+btnLog.addEventListener("click", () => toggleLogs(!logPanel.classList.contains("open")));
+document.getElementById("logClose").addEventListener("click", () => toggleLogs(false));
+document.getElementById("logClear").addEventListener("click", () => { logLines.length = 0; paintLogs(); });
+document.getElementById("logCopy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(logLines.join("\n")); log("info", "Logs copiados"); }
+  catch (_) { log("warn", "No se pudo copiar al portapapeles"); }
+});
+
+/* ============================================================
+ * Inicio
+ * ============================================================ */
+log("info", "Iniciando", { api: CONFIG.API_URL, endpoint: CONFIG.ENDPOINT_BUSES, auth: CONFIG.USE_AUTH, refresh_ms: CONFIG.REFRESH_MS, ua: navigator.userAgent });
+locate(true);
+refresh();
+</script>
+</body>
+</html>
