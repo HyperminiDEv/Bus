@@ -1,0 +1,336 @@
+:root{
+  --ink:#17202b;
+  --muted:#687383;
+  --line:#e1e6ec;
+  --panel:rgba(255,255,255,.96);
+  --surface:#ffffff;
+  --accent:#0d6b57;
+  --accent-soft:#e5f4ef;
+  --warn:#b3261e;
+  --warning-soft:#fff4d7;
+  --bus-default:#1d4ed8;
+  --bus-cot:#d6453d;
+  --bus-copsa:#e08a00;
+  --bus-turil:#2e9e5b;
+  --bus-rutas-del-sol:#c2185b;
+  --bus-nossar:#7b3fb5;
+  --bus-casanova:#00897b;
+  --bus-cita:#6d4c41;
+  --bus-copay:#f4511e;
+  --bus-tur-nor:#455a64;
+  --bus-el-rapido:#827717;
+  --tile-filter:grayscale(1) brightness(1.12) contrast(.8);
+}
+
+*{
+  box-sizing:border-box;
+  -webkit-tap-highlight-color:transparent;
+}
+
+html,
+body{
+  height:100%;
+  margin:0;
+  background:#fff;
+  color:var(--ink);
+  font:15px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  overscroll-behavior:none;
+}
+
+#map{
+  position:fixed;
+  inset:0;
+  background:#f4f5f6;
+}
+
+.leaflet-container{
+  font:inherit;
+}
+
+.base-tiles{
+  filter:var(--tile-filter,none);
+}
+
+.bar{
+  position:fixed;
+  z-index:1000;
+  top:0;
+  left:0;
+  right:0;
+  display:flex;
+  gap:8px;
+  align-items:center;
+  padding:calc(env(safe-area-inset-top,0px) + 8px) 10px 8px;
+  pointer-events:none;
+}
+
+.bar>*{
+  pointer-events:auto;
+}
+
+.field{
+  display:flex;
+  flex:1;
+  min-width:0;
+  gap:6px;
+}
+
+select,
+button{
+  height:42px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--panel);
+  color:var(--ink);
+  box-shadow:0 1px 3px rgba(0,0,0,.08);
+  font:inherit;
+}
+
+select{
+  flex:1;
+  min-width:0;
+  max-width:280px;
+  padding:0 12px;
+  font-size:16px;
+}
+
+button{
+  display:grid;
+  width:42px;
+  padding:0;
+  place-items:center;
+  cursor:pointer;
+}
+
+button:active{
+  background:#eef1f4;
+}
+
+button svg{
+  width:20px;
+  height:20px;
+  fill:none;
+  stroke:var(--ink);
+  stroke-width:2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+
+button.on svg{
+  stroke:var(--accent);
+}
+
+.status{
+  position:fixed;
+  z-index:1000;
+  left:10px;
+  bottom:calc(env(safe-area-inset-bottom,0px) + 12px);
+  display:flex;
+  max-width:calc(100% - 20px);
+  align-items:center;
+  gap:8px;
+  border:1px solid var(--line);
+  border-radius:999px;
+  background:var(--panel);
+  box-shadow:0 1px 3px rgba(0,0,0,.08);
+  color:var(--muted);
+  padding:7px 13px;
+  font-size:13px;
+}
+
+.dot{
+  width:8px;
+  height:8px;
+  flex:none;
+  border-radius:50%;
+  background:#aab2bd;
+}
+
+.dot.ok{
+  background:var(--accent);
+}
+
+.dot.err{
+  background:var(--warn);
+}
+
+.dot.load{
+  background:#d89b00;
+}
+
+#logpanel{
+  position:fixed;
+  z-index:1001;
+  left:0;
+  right:0;
+  bottom:0;
+  display:none;
+  height:45%;
+  flex-direction:column;
+  background:#10161d;
+  color:#cfe3d9;
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+
+#logpanel.open{
+  display:flex;
+}
+
+#logpanel header{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  border-bottom:1px solid #26313d;
+  padding:8px 10px;
+}
+
+#logpanel header b{
+  flex:1;
+  font-weight:600;
+}
+
+#logpanel header button{
+  width:auto;
+  height:32px;
+  border-color:#2c3a48;
+  background:#1b2530;
+  box-shadow:none;
+  color:#cfe3d9;
+  padding:0 12px;
+  font-size:13px;
+}
+
+#logbody{
+  flex:1;
+  overflow:auto;
+  padding:6px 10px;
+  font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;
+  white-space:pre-wrap;
+  word-break:break-word;
+  -webkit-overflow-scrolling:touch;
+}
+
+.l-warn{
+  color:#f1c36a;
+}
+
+.l-error{
+  color:#ff8c84;
+}
+
+.l-debug{
+  color:#7f93a6;
+}
+
+.leaflet-popup-content-wrapper{
+  border-radius:12px;
+}
+
+.leaflet-popup-content{
+  min-width:220px;
+  max-width:280px;
+  margin:12px 14px;
+  font-size:13px;
+}
+
+.pop{
+  display:grid;
+  gap:10px;
+}
+
+.pop__head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+}
+
+.pop__label{
+  margin:0 0 1px;
+  color:var(--muted);
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:0;
+  text-transform:uppercase;
+}
+
+.pop h3{
+  margin:0;
+  font-size:18px;
+  line-height:1.1;
+}
+
+.pop__status{
+  max-width:120px;
+  border-radius:999px;
+  background:var(--accent-soft);
+  color:var(--accent);
+  padding:4px 8px;
+  font-size:12px;
+  font-weight:700;
+  line-height:1.2;
+  text-align:center;
+}
+
+.pop__status.warning{
+  background:var(--warning-soft);
+  color:#8a5a00;
+}
+
+.pop__status.neutral{
+  background:#eef1f4;
+  color:#596575;
+}
+
+.pop__route{
+  margin:0;
+  border-top:1px solid var(--line);
+  border-bottom:1px solid var(--line);
+  padding:8px 0;
+  font-weight:700;
+}
+
+.pop dl{
+  display:grid;
+  grid-template-columns:minmax(76px,auto) minmax(0,1fr);
+  gap:6px 12px;
+  margin:0;
+}
+
+.pop dt{
+  color:var(--muted);
+}
+
+.pop dd{
+  min-width:0;
+  margin:0;
+  color:var(--ink);
+  font-weight:600;
+  word-break:break-word;
+}
+
+.pop__note{
+  margin:0;
+  border-top:1px solid var(--line);
+  padding-top:8px;
+  color:var(--muted);
+}
+
+.me{
+  width:16px;
+  height:16px;
+  border:3px solid #fff;
+  border-radius:50%;
+  background:#1a73e8;
+  box-shadow:0 0 0 2px rgba(26,115,232,.35);
+}
+
+@media (max-width:420px){
+  .leaflet-popup-content{
+    min-width:210px;
+  }
+
+  .pop dl{
+    grid-template-columns:72px minmax(0,1fr);
+  }
+}
